@@ -1,17 +1,26 @@
 pipeline {
-
     agent any
 
     environment {
-        AWS_REGION = 'ap-south-2'
+        AWS_DEFAULT_REGION = 'ap-south-1'
     }
 
     stages {
 
+        stage('Clean Workspace') {
+            steps {
+                echo '=========================================='
+                echo 'Cleaning Jenkins Workspace'
+                echo '=========================================='
+
+                deleteDir()
+            }
+        }
+
         stage('Git Checkout') {
             steps {
                 echo '=========================================='
-                echo 'Cloning Terraform project from GitHub'
+                echo 'Cloning Terraform Project'
                 echo '=========================================='
 
                 git branch: 'main',
@@ -30,11 +39,11 @@ pipeline {
 
         stage('Check Tools') {
             steps {
-                sh '''
-                    echo "=========================================="
-                    echo "Checking Installed Tools"
-                    echo "=========================================="
+                echo '=========================================='
+                echo 'Checking Tools'
+                echo '=========================================='
 
+                sh '''
                     echo "Terraform version:"
                     terraform --version
 
@@ -48,20 +57,24 @@ pipeline {
         stage('AWS Authentication') {
             steps {
                 echo '=========================================='
-                echo 'Testing AWS authentication'
+                echo 'AWS Authentication'
                 echo '=========================================='
 
                 withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-ecr']
+                    usernamePassword(
+                        credentialsId: 'aws-ecr',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
                 ]) {
                     sh '''
-                        echo "Checking AWS identity..."
+                        export AWS_DEFAULT_REGION=ap-south-1
+
+                        echo "Testing AWS authentication..."
                         aws sts get-caller-identity
 
                         echo ""
-                        echo "AWS Region:"
-                        echo "$AWS_REGION"
+                        echo "AWS authentication successful."
                     '''
                 }
             }
@@ -70,48 +83,81 @@ pipeline {
         stage('Terraform Init') {
             steps {
                 echo '=========================================='
-                echo 'Terraform Init'
+                echo 'TERRAFORM INIT'
                 echo '=========================================='
 
                 withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-ecr']
+                    usernamePassword(
+                        credentialsId: 'aws-ecr',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
                 ]) {
                     sh '''
-                        export AWS_DEFAULT_REGION="$AWS_REGION"
+                        export AWS_DEFAULT_REGION=ap-south-1
 
-                        terraform init
+                        rm -rf .terraform
+                        rm -f .terraform.lock.hcl
+
+                        terraform init -input=false
                     '''
                 }
+            }
+        }
+
+        stage('Terraform Format') {
+            steps {
+                echo '=========================================='
+                echo 'TERRAFORM FORMAT CHECK'
+                echo '=========================================='
+
+                sh '''
+                    terraform fmt -check -recursive
+                '''
             }
         }
 
         stage('Terraform Validate') {
             steps {
                 echo '=========================================='
-                echo 'Terraform Validate'
+                echo 'TERRAFORM VALIDATE'
                 echo '=========================================='
 
-                sh '''
-                    terraform validate
-                '''
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'aws-ecr',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
+                    sh '''
+                        export AWS_DEFAULT_REGION=ap-south-1
+
+                        terraform validate
+                    '''
+                }
             }
         }
 
         stage('Terraform Plan') {
             steps {
                 echo '=========================================='
-                echo 'Terraform Plan'
+                echo 'TERRAFORM PLAN'
                 echo '=========================================='
 
                 withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-ecr']
+                    usernamePassword(
+                        credentialsId: 'aws-ecr',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
                 ]) {
                     sh '''
-                        export AWS_DEFAULT_REGION="$AWS_REGION"
+                        export AWS_DEFAULT_REGION=ap-south-1
 
-                        terraform plan -out=tfplan
+                        terraform plan \
+                            -input=false \
+                            -out=tfplan
                     '''
                 }
             }
@@ -120,17 +166,23 @@ pipeline {
         stage('Terraform Apply') {
             steps {
                 echo '=========================================='
-                echo 'Terraform Apply'
+                echo 'TERRAFORM APPLY'
                 echo '=========================================='
 
                 withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-ecr']
+                    usernamePassword(
+                        credentialsId: 'aws-ecr',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
                 ]) {
                     sh '''
-                        export AWS_DEFAULT_REGION="$AWS_REGION"
+                        export AWS_DEFAULT_REGION=ap-south-1
 
-                        terraform apply -auto-approve tfplan
+                        terraform apply \
+                            -input=false \
+                            -auto-approve \
+                            tfplan
                     '''
                 }
             }
@@ -139,15 +191,18 @@ pipeline {
         stage('Terraform Output') {
             steps {
                 echo '=========================================='
-                echo 'Terraform Output'
+                echo 'TERRAFORM OUTPUT'
                 echo '=========================================='
 
                 withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-ecr']
+                    usernamePassword(
+                        credentialsId: 'aws-ecr',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
                 ]) {
                     sh '''
-                        export AWS_DEFAULT_REGION="$AWS_REGION"
+                        export AWS_DEFAULT_REGION=ap-south-1
 
                         terraform output
                     '''
@@ -159,22 +214,22 @@ pipeline {
     post {
         success {
             echo '''
-            ==========================================
-            TERRAFORM DEPLOYMENT SUCCESSFUL
-            ==========================================
-            AWS resources have been created successfully.
-            ==========================================
-            '''
+==========================================
+TERRAFORM DEPLOYMENT SUCCESSFUL
+==========================================
+VPC and Public Subnet created successfully.
+==========================================
+'''
         }
 
         failure {
             echo '''
-            ==========================================
-            TERRAFORM DEPLOYMENT FAILED
-            ==========================================
-            Check Jenkins Console Output.
-            ==========================================
-            '''
+==========================================
+TERRAFORM DEPLOYMENT FAILED
+==========================================
+Check the Jenkins Console Output.
+==========================================
+'''
         }
 
         always {
